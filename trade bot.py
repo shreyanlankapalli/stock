@@ -1,69 +1,73 @@
 import alpaca_trade_api as tradeapi
-import pandas as pd
-import numpy as np
+from datetime import datetime
+import pytz
+from config import *
 
-# -----------------------------
-# SETUP
-# -----------------------------
-api = tradeapi.REST()  # no base URL here
+api = tradeapi.REST(API_KEY, SECRET_KEY, BASE_URL, api_version="v2")
 
-symbols = ["AAPL", "MSFT", "AMZN", "GOOGL"]
-risk_percent = 0.02
+watchlist_name = "My Watchlist"
+opening_prices = {}
+positions_peak = {}
 
-account = api.get_account()
-account_balance = float(account.cash)
+def get_watchlist_symbols():
+    watchlists = api.get_watchlists()
+    wl = next(w for w in watchlists if w.name == watchlist_name)
+    return [asset.symbol for asset in wl.assets]
 
-positions = {p.symbol: p for p in api.list_positions()}
+def get_price(symbol):
+    bar = api.get_latest_bar(symbol)
+    return float(bar.c)
 
-# -----------------------------
-# LOOP THROUGH STOCKS
-# -----------------------------
-for symbol in symbols:
+def record_opening_prices(symbols):
+    for s in symbols:
+        if s not in opening_prices:
+            opening_prices[s] = get_price(s)
 
-    bars = api.get_bars(symbol, tradeapi.TimeFrame.Minute, limit=50).df
-    current_price = bars["close"].iloc[-1]
-    moving_average = bars["close"].mean()
+def buy_if_triggered(symbol):
+    price = get_price(symbol)
+    if price >= opening_prices[symbol] + BUY_TRIGGER:
+        api.submit_order(
+            symbol=symbol,
+            qty=1,
+            side="buy",
+            type="market",
+            time_in_force="gtc"
+        )
+        positions_peak[symbol] = price
+        print(f"BOUGHT {symbol} @ {price}")
 
-    # RSI calculation
-    delta = bars["close"].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(14).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    rsi_value = rsi.iloc[-1]
+def update_trailing_stop(symbol):
+    price = get_price(symbol)
+    peak = max(positions_peak[symbol], price)
+    positions_peak[symbol] = peak
 
-    has_position = symbol in positions
+    if price <= peak - TRAILING_STOP:
+        api.submit_order(
+            symbol=symbol,
+            qty=1,
+            side="sell",
+            type="market",
+            time_in_force="gtc"
+        )
+        del positions_peak[symbol]
+        print(f"SOLD {symbol} @ {price}")
 
-    # -----------------------------
-    # BUY LOGIC
-    # -----------------------------
-    if current_price > moving_average and rsi_value < 70 and not has_position:
-        qty = int((account_balance * risk_percent) / current_price)
+def run():
+    symbols = get_watchlist_symbols()
+    record_opening_prices(symbols)
 
-        if qty > 0:
-            api.submit_order(
-                symbol=symbol,
-                qty=qty,
-                side="buy",
-                type="market",
-                time_in_force="gtc"
-            )
+    positions = {p.symbol for p in api.list_positions()}
 
-    # -----------------------------
-    # SELL LOGIC
-    # -----------------------------
-    if has_position:
-        position = positions[symbol]
-        entry_price = float(position.avg_entry_price)
+    for s in symbols:
+        if s not in positions:
+            buy_if_triggered(s)
 
-        stop_loss = entry_price * 0.98
-        take_profit = entry_price * 1.04
+    for s in list(positions_peak.keys()):
+        update_trailing_stop(s)
 
-        if current_price < moving_average:
-            api.submit_order(symbol, position.qty, "sell", "market", "gtc")
+if __name__ == "__main__":
+    eastern = pytz.timezone("US/Eastern")
+    now = datetime.now(eastern)
 
-        if current_price <= stop_loss:
-            api.submit_order(symbol, position.qty, "sell", "market", "gtc")
-
-        if current_price >= take_profit:
-            api.submit_order(symbol, position.qty, "sell", "market", "gtc")
+    if now.weekday() < 5:  # Mon–Fri
+        run()
