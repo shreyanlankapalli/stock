@@ -1,28 +1,53 @@
-name: Alpaca Trading Bot
+name: Paper Trading Bot (5h runtime)
 
 on:
   schedule:
-    - cron: "30 13 * * 1-5"  # 8:30 AM EST
-    - cron: "0 14-18 * * 1-5" # every hour until 1:30 PM
-  workflow_dispatch:
+    # Example: 8:30 AM CST = 14:30 UTC (CST only; does not adapt to CDT)
+    - cron: "30 14 * * 1-5"
+  workflow_dispatch: {}
 
 jobs:
   trade:
     runs-on: ubuntu-latest
+    timeout-minutes: 360   # 6 hours total budget
 
     steps:
-    - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.10"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-    - name: Install dependencies
-      run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Run trader
-      env:
-        ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-        ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-      run: python trader.py
+      - name: Restore bot state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            bot_state.json
+            trade_log.jsonl
+          key: paperbot-state-${{ github.ref }}-${{ github.run_id }}
+          restore-keys: |
+            paperbot-state-${{ github.ref }}-
+
+      - name: Run paper trading bot (5 hours)
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        run: |
+          python trading_bot.py
+
+      # This step runs after the script exits (after ~5 hours),
+      # leaving time for caching/upload within the 6-hour job timeout.
+      - name: Save bot state cache
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            bot_state.json
+            trade_log.jsonl
+          key: paperbot-state-${{ github.ref }}-${{ github.run_id }}
