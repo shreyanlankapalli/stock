@@ -22,10 +22,18 @@ LOG_FILE = "trade_log.jsonl"
 # =========================
 # CONFIG
 # =========================
-SYMBOLS = ["AAPL", "MSFT", "SPY"]
+SYMBOLS = [
+    "AAPL", "MSFT", "SPY",
+
+    "NVDA", "TSLA", "AMD", "META", "AMZN",
+    "NFLX", "GOOGL", "QQQ", "SMCI", "COIN",
+    "PLTR", "INTC", "MU", "AVGO", "ADBE",
+    "CRM", "PYPL", "SHOP", "UBER", "SNOW"
+]
+
 DOLLARS_PER_TRADE = 250
-FAST_SMA = 10
-SLOW_SMA = 30
+FAST_SMA = 5
+SLOW_SMA = 12
 POLL_SECONDS = 60
 RUNTIME_HOURS = 5
 
